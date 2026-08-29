@@ -1,0 +1,311 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.44.1.10279",
+      "templateHash": "12203014013950298495"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "metadata": {
+        "description": "Location for DCE and DCR resources."
+      }
+    },
+    "logAnalyticsWorkspaceName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the existing Log Analytics workspace."
+      }
+    },
+    "customTableName": {
+      "type": "string",
+      "defaultValue": "Locksmith2_CL",
+      "metadata": {
+        "description": "Name of the custom table. Must end with _CL."
+      }
+    },
+    "dataCollectionEndpointName": {
+      "type": "string",
+      "defaultValue": "dce-locksmith2",
+      "metadata": {
+        "description": "Name of the Data Collection Endpoint."
+      }
+    },
+    "dataCollectionRuleName": {
+      "type": "string",
+      "defaultValue": "dcr-locksmith2",
+      "metadata": {
+        "description": "Name of the Data Collection Rule."
+      }
+    },
+    "streamName": {
+      "type": "string",
+      "defaultValue": "Custom-Locksmith2Stream",
+      "metadata": {
+        "description": "Custom stream used by the Log Ingestion API."
+      }
+    },
+    "managedIdentityPrincipalId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Object ID of the managed identity that should ingest into the DCR. Leave empty to skip RBAC assignment."
+      }
+    },
+    "managedIdentityResourceGroupName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Resource group of the Arc machine or VM identity source. Used only when managedIdentityPrincipalId is empty."
+      }
+    },
+    "managedIdentityArcMachineName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of an Arc machine (Microsoft.HybridCompute/machines) whose system-assigned identity should ingest into the DCR."
+      }
+    },
+    "managedIdentityVmName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of an Azure VM (Microsoft.Compute/virtualMachines) whose system-assigned identity should ingest into the DCR."
+      }
+    }
+  },
+  "variables": {
+    "copy": [
+      {
+        "name": "streamColumns",
+        "count": "[length(variables('tableColumns'))]",
+        "input": {
+          "name": "[variables('tableColumns')[copyIndex('streamColumns')].name]",
+          "type": "[if(equals(variables('tableColumns')[copyIndex('streamColumns')].type, 'bool'), 'boolean', variables('tableColumns')[copyIndex('streamColumns')].type)]"
+        }
+      }
+    ],
+    "tableColumns": [
+      {
+        "name": "TimeGenerated",
+        "type": "datetime"
+      },
+      {
+        "name": "Technique",
+        "type": "string"
+      },
+      {
+        "name": "Forest",
+        "type": "string"
+      },
+      {
+        "name": "Name",
+        "type": "string"
+      },
+      {
+        "name": "DistinguishedName",
+        "type": "string"
+      },
+      {
+        "name": "ObjectClass",
+        "type": "string"
+      },
+      {
+        "name": "IdentityReference",
+        "type": "string"
+      },
+      {
+        "name": "IdentityReferenceSID",
+        "type": "string"
+      },
+      {
+        "name": "IdentityReferenceClass",
+        "type": "string"
+      },
+      {
+        "name": "ActiveDirectoryRights",
+        "type": "string"
+      },
+      {
+        "name": "AceObjectTypeGUID",
+        "type": "string"
+      },
+      {
+        "name": "AceObjectTypeName",
+        "type": "string"
+      },
+      {
+        "name": "Enabled",
+        "type": "bool"
+      },
+      {
+        "name": "EnabledOn",
+        "type": "dynamic"
+      },
+      {
+        "name": "CAFullName",
+        "type": "string"
+      },
+      {
+        "name": "Owner",
+        "type": "string"
+      },
+      {
+        "name": "HasNonStandardOwner",
+        "type": "bool"
+      },
+      {
+        "name": "MemberCount",
+        "type": "long"
+      },
+      {
+        "name": "Issue",
+        "type": "string"
+      },
+      {
+        "name": "Fix",
+        "type": "string"
+      },
+      {
+        "name": "Revert",
+        "type": "string"
+      }
+    ],
+    "monitoringMetricsPublisherRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')]",
+    "arcMachineResourceId": "[if(and(not(empty(parameters('managedIdentityArcMachineName'))), not(empty(parameters('managedIdentityResourceGroupName')))), resourceId(parameters('managedIdentityResourceGroupName'), 'Microsoft.HybridCompute/machines', parameters('managedIdentityArcMachineName')), '')]",
+    "vmResourceId": "[if(and(not(empty(parameters('managedIdentityVmName'))), not(empty(parameters('managedIdentityResourceGroupName')))), resourceId(parameters('managedIdentityResourceGroupName'), 'Microsoft.Compute/virtualMachines', parameters('managedIdentityVmName')), '')]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/tables",
+      "apiVersion": "2022-10-01",
+      "name": "[format('{0}/{1}', parameters('logAnalyticsWorkspaceName'), parameters('customTableName'))]",
+      "properties": {
+        "schema": {
+          "name": "[parameters('customTableName')]",
+          "columns": "[variables('tableColumns')]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/dataCollectionEndpoints",
+      "apiVersion": "2022-06-01",
+      "name": "[parameters('dataCollectionEndpointName')]",
+      "location": "[parameters('location')]",
+      "kind": "Linux",
+      "properties": {
+        "networkAcls": {
+          "publicNetworkAccess": "Enabled"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/dataCollectionRules",
+      "apiVersion": "2022-06-01",
+      "name": "[parameters('dataCollectionRuleName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "dataCollectionEndpointId": "[resourceId('Microsoft.Insights/dataCollectionEndpoints', parameters('dataCollectionEndpointName'))]",
+        "streamDeclarations": {
+          "[format('{0}', parameters('streamName'))]": {
+            "columns": "[variables('streamColumns')]"
+          }
+        },
+        "destinations": {
+          "logAnalytics": [
+            {
+              "name": "lawDestination",
+              "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]"
+            }
+          ]
+        },
+        "dataFlows": [
+          {
+            "streams": [
+              "[parameters('streamName')]"
+            ],
+            "destinations": [
+              "lawDestination"
+            ],
+            "outputStream": "[format('Custom-{0}', parameters('customTableName'))]",
+            "transformKql": "source"
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/dataCollectionEndpoints', parameters('dataCollectionEndpointName'))]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('managedIdentityPrincipalId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]",
+      "name": "[guid(resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName')), parameters('managedIdentityPrincipalId'), variables('monitoringMetricsPublisherRoleDefinitionId'))]",
+      "properties": {
+        "roleDefinitionId": "[variables('monitoringMetricsPublisherRoleDefinitionId')]",
+        "principalId": "[parameters('managedIdentityPrincipalId')]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]"
+      ]
+    },
+    {
+      "condition": "[and(and(empty(parameters('managedIdentityPrincipalId')), not(empty(parameters('managedIdentityArcMachineName')))), not(empty(parameters('managedIdentityResourceGroupName'))))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]",
+      "name": "[guid(resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName')), parameters('managedIdentityResourceGroupName'), parameters('managedIdentityArcMachineName'), variables('monitoringMetricsPublisherRoleDefinitionId'))]",
+      "properties": {
+        "roleDefinitionId": "[variables('monitoringMetricsPublisherRoleDefinitionId')]",
+        "principalId": "[reference(variables('arcMachineResourceId'), '2023-03-15', 'Full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]"
+      ]
+    },
+    {
+      "condition": "[and(and(and(empty(parameters('managedIdentityPrincipalId')), empty(parameters('managedIdentityArcMachineName'))), not(empty(parameters('managedIdentityVmName')))), not(empty(parameters('managedIdentityResourceGroupName'))))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]",
+      "name": "[guid(resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName')), parameters('managedIdentityResourceGroupName'), parameters('managedIdentityVmName'), variables('monitoringMetricsPublisherRoleDefinitionId'))]",
+      "properties": {
+        "roleDefinitionId": "[variables('monitoringMetricsPublisherRoleDefinitionId')]",
+        "principalId": "[reference(variables('vmResourceId'), '2023-09-01', 'Full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "customTableResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.OperationalInsights/workspaces/tables', parameters('logAnalyticsWorkspaceName'), parameters('customTableName'))]"
+    },
+    "dataCollectionEndpointUri": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Insights/dataCollectionEndpoints', parameters('dataCollectionEndpointName')), '2022-06-01').logsIngestion.endpoint]"
+    },
+    "dataCollectionRuleImmutableId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName')), '2022-06-01').immutableId]"
+    },
+    "streamNameOut": {
+      "type": "string",
+      "value": "[parameters('streamName')]"
+    },
+    "dataCollectionRuleResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]"
+    }
+  }
+}
