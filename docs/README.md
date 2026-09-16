@@ -165,3 +165,10 @@ Locksmith2_CL
 | summarize count() by Technique
 | order by count_ desc
 ```
+
+## 👏 Shoutouts & Thanks
+
+A special thanks to these fantastic supporters and Microsoft MVP Fellows:
+
+* **Nicola Suter** ([@nicolonsky](https://github.com/nicolonsky)) – for optimizing and testing the script
+* **Jake Hildreth** ([@jakehildreth](https://github.com/jakehildreth)) – for his awesome work on Locksmith2 and for backing my solution
