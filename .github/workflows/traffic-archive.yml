@@ -45,7 +45,7 @@ jobs:
         env:
           REPO_ALIAS: LS2Sent # <--- Hier identisch anpassen
         run: |
-          git clone "https://x-access-token:${TRAFFIC_PAT}@github.com/benscha/stats.git" stats-repo
+          git clone "https://x-access-token:$(echo -n "$TRAFFIC_PAT" | tr -d '[:space:]')@github.com/benscha/stats.git" stats-repo
           mkdir -p stats-repo/traffic
           cp traffic/*.json stats-repo/traffic/
           cd stats-repo
