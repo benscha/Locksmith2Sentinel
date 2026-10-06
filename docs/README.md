@@ -166,6 +166,29 @@ Locksmith2_CL
 | order by count_ desc
 ```
 
+### Detect new Issues
+
+```kusto
+let Lookback = 8d; // 1D+ than the Locksmith2 Report Generation
+let Base = Locksmith2_CL
+    | where TimeGenerated > ago(Lookback)
+    | extend FindingKey = strcat(Technique, "|", Forest, "|", DistinguishedName, "|", IdentityReference, "|", ActiveDirectoryRights, "|", CAFullName);
+// Everything that was already present before the current scan
+let Known = Base
+    | where TimeGenerated < ago(1d)
+    | project FindingKey;
+// Only rows from the latest scan that were not previously known
+Base
+| where TimeGenerated >= ago(1d)
+| join kind=leftanti Known on FindingKey
+| project TimeGenerated, Technique, Forest, Name, ObjectClass, IdentityReference, ActiveDirectoryRights, CAFullName, Issue, Fix, Revert
+```
+
+
+
+## AI-Assisted Development
+🤖 Locksmith2Sentinel is developed with the assistance of AI. AI is used throughout the development and research process, with human review and validation of the resulting work.
+
 ## 👏 Shoutouts & Thanks
 
 A special thanks to these fantastic supporters and Microsoft MVP Fellows:
