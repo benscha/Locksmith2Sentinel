@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.44.1.10279",
-      "templateHash": "12203014013950298495"
+      "version": "0.47.16.16243",
+      "templateHash": "8375052860929324259"
     }
   },
   "parameters": {
@@ -53,28 +53,7 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Object ID of the managed identity that should ingest into the DCR. Leave empty to skip RBAC assignment."
-      }
-    },
-    "managedIdentityResourceGroupName": {
-      "type": "string",
-      "defaultValue": "",
-      "metadata": {
-        "description": "Resource group of the Arc machine or VM identity source. Used only when managedIdentityPrincipalId is empty."
-      }
-    },
-    "managedIdentityArcMachineName": {
-      "type": "string",
-      "defaultValue": "",
-      "metadata": {
-        "description": "Name of an Arc machine (Microsoft.HybridCompute/machines) whose system-assigned identity should ingest into the DCR."
-      }
-    },
-    "managedIdentityVmName": {
-      "type": "string",
-      "defaultValue": "",
-      "metadata": {
-        "description": "Name of an Azure VM (Microsoft.Compute/virtualMachines) whose system-assigned identity should ingest into the DCR."
+        "description": "Principal (object) ID of the managed identity that should ingest into the DCR. Use the identity principal ID for either an Arc machine, Azure VM, or user-assigned managed identity. Leave empty to skip RBAC assignment."
       }
     }
   },
@@ -175,9 +154,7 @@
         "type": "string"
       }
     ],
-    "monitoringMetricsPublisherRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')]",
-    "arcMachineResourceId": "[if(and(not(empty(parameters('managedIdentityArcMachineName'))), not(empty(parameters('managedIdentityResourceGroupName')))), resourceId(parameters('managedIdentityResourceGroupName'), 'Microsoft.HybridCompute/machines', parameters('managedIdentityArcMachineName')), '')]",
-    "vmResourceId": "[if(and(not(empty(parameters('managedIdentityVmName'))), not(empty(parameters('managedIdentityResourceGroupName')))), resourceId(parameters('managedIdentityResourceGroupName'), 'Microsoft.Compute/virtualMachines', parameters('managedIdentityVmName')), '')]"
+    "monitoringMetricsPublisherRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')]"
   },
   "resources": [
     {
@@ -256,30 +233,18 @@
       ]
     },
     {
-      "condition": "[and(and(empty(parameters('managedIdentityPrincipalId')), not(empty(parameters('managedIdentityArcMachineName')))), not(empty(parameters('managedIdentityResourceGroupName'))))]",
-      "type": "Microsoft.Authorization/roleAssignments",
-      "apiVersion": "2022-04-01",
+      "type": "Microsoft.Insights/diagnosticSettings",
+      "apiVersion": "2021-05-01-preview",
       "scope": "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]",
-      "name": "[guid(resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName')), parameters('managedIdentityResourceGroupName'), parameters('managedIdentityArcMachineName'), variables('monitoringMetricsPublisherRoleDefinitionId'))]",
+      "name": "[format('{0}-diagnostics', parameters('dataCollectionRuleName'))]",
       "properties": {
-        "roleDefinitionId": "[variables('monitoringMetricsPublisherRoleDefinitionId')]",
-        "principalId": "[reference(variables('arcMachineResourceId'), '2023-03-15', 'Full').identity.principalId]",
-        "principalType": "ServicePrincipal"
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]"
-      ]
-    },
-    {
-      "condition": "[and(and(and(empty(parameters('managedIdentityPrincipalId')), empty(parameters('managedIdentityArcMachineName'))), not(empty(parameters('managedIdentityVmName')))), not(empty(parameters('managedIdentityResourceGroupName'))))]",
-      "type": "Microsoft.Authorization/roleAssignments",
-      "apiVersion": "2022-04-01",
-      "scope": "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]",
-      "name": "[guid(resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName')), parameters('managedIdentityResourceGroupName'), parameters('managedIdentityVmName'), variables('monitoringMetricsPublisherRoleDefinitionId'))]",
-      "properties": {
-        "roleDefinitionId": "[variables('monitoringMetricsPublisherRoleDefinitionId')]",
-        "principalId": "[reference(variables('vmResourceId'), '2023-09-01', 'Full').identity.principalId]",
-        "principalType": "ServicePrincipal"
+        "workspaceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]",
+        "logs": [
+          {
+            "category": "LogErrors",
+            "enabled": true
+          }
+        ]
       },
       "dependsOn": [
         "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]"

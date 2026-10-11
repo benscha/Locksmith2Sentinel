@@ -18,17 +18,8 @@ param dataCollectionRuleName string = 'dcr-locksmith2'
 @description('Custom stream used by the Log Ingestion API.')
 param streamName string = 'Custom-Locksmith2Stream'
 
-@description('Object ID of the managed identity that should ingest into the DCR. Leave empty to skip RBAC assignment.')
+@description('Principal (object) ID of the managed identity that should ingest into the DCR. Use the identity principal ID for either an Arc machine, Azure VM, or user-assigned managed identity. Leave empty to skip RBAC assignment.')
 param managedIdentityPrincipalId string = ''
-
-@description('Resource group of the Arc machine or VM identity source. Used only when managedIdentityPrincipalId is empty.')
-param managedIdentityResourceGroupName string = ''
-
-@description('Name of an Arc machine (Microsoft.HybridCompute/machines) whose system-assigned identity should ingest into the DCR.')
-param managedIdentityArcMachineName string = ''
-
-@description('Name of an Azure VM (Microsoft.Compute/virtualMachines) whose system-assigned identity should ingest into the DCR.')
-param managedIdentityVmName string = ''
 
 // Shared column definitions for the custom table and the DCR stream declaration.
 // 'bool'/'boolean' and 'long' differ in name between the table schema and the DCR
@@ -128,14 +119,6 @@ resource dcr 'Microsoft.Insights/dataCollectionRules@2022-06-01' = {
   }
 }
 
-var arcMachineResourceId = !empty(managedIdentityArcMachineName) && !empty(managedIdentityResourceGroupName)
-  ? resourceId(managedIdentityResourceGroupName, 'Microsoft.HybridCompute/machines', managedIdentityArcMachineName)
-  : ''
-
-var vmResourceId = !empty(managedIdentityVmName) && !empty(managedIdentityResourceGroupName)
-  ? resourceId(managedIdentityResourceGroupName, 'Microsoft.Compute/virtualMachines', managedIdentityVmName)
-  : ''
-
 resource dcrIngestionRoleAssignmentFromPrincipalId 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(managedIdentityPrincipalId)) {
   name: guid(dcr.id, managedIdentityPrincipalId, monitoringMetricsPublisherRoleDefinitionId)
   scope: dcr
@@ -146,33 +129,17 @@ resource dcrIngestionRoleAssignmentFromPrincipalId 'Microsoft.Authorization/role
   }
 }
 
-resource dcrIngestionRoleAssignmentFromArcMachine 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (empty(managedIdentityPrincipalId) && !empty(managedIdentityArcMachineName) && !empty(managedIdentityResourceGroupName)) {
-  name: guid(
-    dcr.id,
-    managedIdentityResourceGroupName,
-    managedIdentityArcMachineName,
-    monitoringMetricsPublisherRoleDefinitionId
-  )
+resource dcrDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: '${dataCollectionRuleName}-diagnostics'
   scope: dcr
   properties: {
-    roleDefinitionId: monitoringMetricsPublisherRoleDefinitionId
-    principalId: reference(arcMachineResourceId, '2023-03-15', 'Full').identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource dcrIngestionRoleAssignmentFromVm 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (empty(managedIdentityPrincipalId) && empty(managedIdentityArcMachineName) && !empty(managedIdentityVmName) && !empty(managedIdentityResourceGroupName)) {
-  name: guid(
-    dcr.id,
-    managedIdentityResourceGroupName,
-    managedIdentityVmName,
-    monitoringMetricsPublisherRoleDefinitionId
-  )
-  scope: dcr
-  properties: {
-    roleDefinitionId: monitoringMetricsPublisherRoleDefinitionId
-    principalId: reference(vmResourceId, '2023-09-01', 'Full').identity.principalId
-    principalType: 'ServicePrincipal'
+    workspaceId: workspace.id
+    logs: [
+      {
+        category: 'LogErrors'
+        enabled: true
+      }
+    ]
   }
 }
 

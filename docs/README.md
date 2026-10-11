@@ -9,8 +9,11 @@ This project automates the ingestion of Locksmith2 JSON reports into a custom ta
     - Custom table `Locksmith2_CL`
     - Data Collection Endpoint (DCE)
     - Data Collection Rule (DCR)
-    - Role assignment `Monitoring Metrics Publisher` on the DCR scope (from explicit principal ID, or auto-resolved from an Arc/VM identity source)
+    - DCR diagnostic setting that routes `LogErrors` to the Log Analytics workspace
+    - Optional role assignment `Monitoring Metrics Publisher` on the DCR scope for a supplied managed identity principal ID
   - Routes the `Custom-Locksmith2Stream` stream into `Locksmith2_CL`.
+- `main.bicepparam`
+  - Supplies deployment parameters separately from the Windows installer. Edit its location, workspace name, and optional managed identity principal ID before deployment.
 - `locksmith2Report.ps1`
   - Reads `*-locksmith2.json`
   - Validates records
@@ -20,22 +23,13 @@ This project automates the ingestion of Locksmith2 JSON reports into a custom ta
   - Archives successfully processed files
   - Writes local logs to `logs`
 - `install.ps1`
-  - Complete installation including:
-    - Azure CLI check/installation
-    - Permission check before deployment
-    - Bicep deployment
-    - Automatic managed identity principal resolution (client ID / Arc token claim)
-    - Automatic Arc/VM identity source detection (machine name + resource group) when principal ID is not provided
-    - Bicep-driven RBAC assignment `Monitoring Metrics Publisher` on DCR scope
-    - `config.json` creation
-    - Download/extract Locksmith2
-    - Create/update scheduled task
-  - Can also run without deployment by using `-SkipDeployment` (uses existing `config.json`)
+  - Installs the Windows-side components only: validates `config.json`, downloads Locksmith2, and creates or updates the scheduled task.
+  - Does not log into Azure or deploy infrastructure. Deploy `main.bicep` separately and populate `config.json` from the deployment outputs.
 
 ## Prerequisites
 
 - Windows Server with access to Azure
-- Permissions on the target resource group (for example `Owner` or `Contributor`)
+- Azure CLI with Bicep support and permissions to deploy resources (for the separate infrastructure deployment)
 - Existing Log Analytics workspace
 - Managed Identity on the server
 
@@ -44,63 +38,57 @@ This project automates the ingestion of Locksmith2 JSON reports into a custom ta
 - No secrets in scripts or config
 - Authentication exclusively via Managed Identity
 - Recommended: user-assigned Managed Identity (lifecycle decoupled from server)
-- RBAC for ingestion: role `Monitoring Metrics Publisher` on DCR scope
+- RBAC for ingestion: role `Monitoring Metrics Publisher` on DCR scope, assigned to the supplied managed identity principal ID
 
-## Installation
+## Infrastructure Deployment
 
-Example command:
-
-```powershell
-.\install.ps1 `
-  -SubscriptionId "<sub-id>" `
-  -ResourceGroupName "<rg-name>" `
-  -WorkspaceName "<law-name>" `
-  -Location "westeurope" `
-  -ManagedIdentityClientId "<optional-uami-client-id>" `
-  -ManagedIdentityPrincipalId "<optional-mi-object-id>" `
-  -ManagedIdentityMachineName "<optional-arc-or-vm-name>" `
-  -ManagedIdentityResourceGroupName "<optional-identity-rg>"
-```
-
-If `-ManagedIdentityPrincipalId` is omitted, the installer now falls back to machine-based auto-resolution:
-
-- resolves machine name from `-ManagedIdentityMachineName` or local hostname
-- detects Arc machine (`Microsoft.HybridCompute/machines`) or Azure VM (`Microsoft.Compute/virtualMachines`)
-- passes that identity source into Bicep, which resolves `identity.principalId` and assigns `Monitoring Metrics Publisher` on the DCR
-
-Notes:
-
-- Without `-NonInteractive`, the script asks for the scheduled task interval interactively.
-- With `-SkipDeployment`, Azure login, Bicep deployment, and RBAC assignment are skipped.
-- When using `-SkipDeployment`, a valid `config.json` must already exist in the project directory.
-- For unattended execution, you can optionally use:
-
-Full installation one-liner (deployment + non-interactive task settings):
+Infrastructure deployment is independent of the Windows installer. Sign in and select the subscription that contains the deployment resource group:
 
 ```powershell
-.\install.ps1 -SubscriptionId "<sub-id>" -ResourceGroupName "<rg-name>" -WorkspaceName "<law-name>" -Location "westeurope" -TaskSchedule DAILY -TaskModifier 1 -NonInteractive
+az login
+az account set --subscription "<subscription-id>"
 ```
+
+Edit `main.bicepparam` before deployment:
+
+- Set `location` and `logAnalyticsWorkspaceName`.
+- Set `managedIdentityPrincipalId` to the principal (object) ID of the managed identity that will ingest data, or leave it empty to skip the RBAC assignment.
+
+For a system-assigned identity on an Arc machine or Azure VM, retrieve its principal ID using its full Azure resource ID:
 
 ```powershell
-.\install.ps1 `
-  -SubscriptionId "<sub-id>" `
-  -ResourceGroupName "<rg-name>" `
-  -WorkspaceName "<law-name>" `
-  -Location "westeurope" `
-  -TaskSchedule DAILY `
-  -TaskModifier 1 `
-  -NonInteractive
+az resource show --ids "<arc-machine-or-vm-resource-id>" --query identity.principalId --output tsv
 ```
 
-Installation without deployment (for example, when Bicep was already deployed from another machine):
+For a user-assigned identity, use the identity's principal ID (not its client ID). The same Bicep parameter works regardless of identity type, machine type, or subscription.
+
+Preview and deploy into the resource group containing the workspace:
 
 ```powershell
-.\install.ps1 `
-  -SkipDeployment `
-  -TaskSchedule DAILY `
-  -TaskModifier 1 `
-  -NonInteractive
+az deployment group what-if --resource-group "<resource-group>" --template-file main.bicep --parameters main.bicepparam
+az deployment group create --resource-group "<resource-group>" --template-file main.bicep --parameters main.bicepparam
 ```
+
+The deployment creates a DCR diagnostic setting that sends the `LogErrors` category to the workspace's `DCRLogErrors` table.
+
+## Windows Installation
+
+Copy `config.json.example` to `config.json` and fill in `DceUri`, `DcrImmutableId`, and `StreamName` from the deployment outputs. Retrieve those values with:
+
+```powershell
+$outputs = az deployment group show --resource-group "<resource-group>" --name "<deployment-name>" --query "properties.outputs" --output json | ConvertFrom-Json
+$outputs.dataCollectionEndpointUri.value
+$outputs.dataCollectionRuleImmutableId.value
+$outputs.streamNameOut.value
+```
+
+Then run the installer on the target Windows Server. Azure deployment is not run by this script:
+
+```powershell
+.\install.ps1 -TaskSchedule DAILY -TaskModifier 1 -NonInteractive
+```
+
+Without `-NonInteractive`, the installer prompts for the scheduled task interval. To create the task yourself, select option 4. If a user-assigned identity is used at runtime, optionally pass its client ID with `-ManagedIdentityClientId` or set it in `config.json`.
 
 ## Runtime Behavior
 
@@ -114,7 +102,7 @@ Successfully ingested files are moved to `archive`.
 
 ## Configuration
 
-The `config.json` file is created by `install.ps1`.
+Create `config.json` by copying `config.json.example`, then add the DCE and DCR values from your deployment outputs. `install.ps1` validates and uses the existing file.
 
 An example is available in `config.json.example`.
 
@@ -124,38 +112,6 @@ Important fields:
 - `DcrImmutableId`
 - `StreamName`
 - `ManagedIdentityClientId` (optional; empty for system-assigned MI)
-
-## External Deployment (SkipDeployment)
-
-If you deploy `main.bicep` from another machine, run `install.ps1` on the target server with `-SkipDeployment`.
-
-In this mode, the installer skips Azure login, Bicep deployment, and RBAC assignment, and uses the existing `config.json`.
-
-You can extract the required values from your deployment outputs:
-
-```powershell
-$outputs = az deployment group show `
-  --resource-group "<rg-name>" `
-  --name "<deployment-name>" `
-  --query "properties.outputs" `
-  --output json | ConvertFrom-Json
-
-$outputs.dataCollectionEndpointUri.value
-$outputs.dataCollectionRuleImmutableId.value
-$outputs.streamNameOut.value
-```
-
-Map them to `config.json` as follows:
-
-- `DceUri` -> `dataCollectionEndpointUri.value`
-- `DcrImmutableId` -> `dataCollectionRuleImmutableId.value`
-- `StreamName` -> `streamNameOut.value`
-
-Then run:
-
-```powershell
-.\install.ps1 -SkipDeployment -TaskSchedule DAILY -TaskModifier 1 -NonInteractive
-```
 
 ## Example KQL
 
