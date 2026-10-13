@@ -157,6 +157,10 @@ Then run:
 .\install.ps1 -SkipDeployment -TaskSchedule DAILY -TaskModifier 1 -NonInteractive
 ```
 
+## Table
+<img width="827" height="315" alt="image" src="https://github.com/user-attachments/assets/0e420f02-8081-4db5-a58a-49c72f6c991d" />
+
+
 ## Example KQL
 
 ```kusto
